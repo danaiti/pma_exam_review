@@ -46,12 +46,109 @@ async function loginIfNeeded(page, email, password) {
   if (!email || !password) {
     throw new Error("The page redirected to login, but email/password were not provided.");
   }
+  // Try a range of selectors to find email + password inputs and the submit control.
+  const emailSelectors = [
+    'input[type="email"]',
+    'input[name*="email"]',
+    'input[id*="email"]',
+    'input[placeholder*="Email"]',
+    'input[placeholder*="email"]',
+    'input[type="text"]'
+  ];
 
-  await page.fill('input[type="text"], input[type="email"]', email);
-  await page.fill('input[type="password"]', password);
-  await page.click('button:has-text("Sign In")');
+  const passwordSelectors = [
+    'input[type="password"]',
+    'input[name*="password"]',
+    'input[id*="password"]',
+    'input[placeholder*="Password"]'
+  ];
 
-  await page.waitForTimeout(1500);
+  const submitSelectors = [
+    'button[type="submit"]',
+    'button:has-text("Sign In")',
+    'button:has-text("Sign in")',
+    'button:has-text("Login")',
+    'input[type="submit"]'
+  ];
+
+  async function findAndFill(selectors, value) {
+    for (const sel of selectors) {
+      try {
+        const el = await page.$(sel);
+        if (el) {
+          await el.fill(value);
+          return true;
+        }
+      } catch (_e) {
+        // ignore
+      }
+    }
+    return false;
+  }
+
+  const filledEmail = await findAndFill(emailSelectors, email);
+  const filledPassword = await findAndFill(passwordSelectors, password);
+
+  // If inputs not found, try to set via JS to catch SPA forms
+  if (!filledEmail) {
+    await page.evaluate((v) => {
+      const q = document.querySelector('input[name*=email], input[id*=email], input[type=email], input[type=text]');
+      if (q) q.value = v;
+    }, email);
+  }
+
+  if (!filledPassword) {
+    await page.evaluate((v) => {
+      const q = document.querySelector('input[type=password], input[name*=password], input[id*=password]');
+      if (q) q.value = v;
+    }, password);
+  }
+
+  // Try to submit the form and wait for navigation or route change.
+  let submitClicked = false;
+  for (const sel of submitSelectors) {
+    try {
+      const btn = await page.$(sel);
+      if (btn) {
+        await Promise.all([
+          page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
+          btn.click()
+        ]);
+        submitClicked = true;
+        break;
+      }
+    } catch (_e) {
+      // ignore
+    }
+  }
+
+  // If no submit button was clicked, try to submit via the form element.
+  if (!submitClicked) {
+    await page.evaluate(() => {
+      const f = document.querySelector('form');
+      if (f) f.submit();
+    });
+    // give SPA some time to react
+    await page.waitForTimeout(1500);
+  }
+
+  // Wait for successful redirect away from login or a recognizable app shell element
+  try {
+    await page.waitForFunction(() => {
+      const url = window.location.href || '';
+      if (!url.includes('/#/auth/login')) return true;
+      // look for an element present in app shell (e.g., 'My courses' link)
+      return !!document.querySelector('a[href="#/student/enrolls"], nav');
+    }, { timeout: 10000 });
+  } catch (err) {
+    // On failure, capture debug artifacts to help diagnose
+    const fs = require('fs');
+    const debugDir = './debug';
+    try { if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir); } catch(e){}
+    try { await page.screenshot({ path: `${debugDir}/login-failed.png`, fullPage: true }); } catch (e) {}
+    try { const html = await page.content(); fs.writeFileSync(`${debugDir}/login-failed.html`, html); } catch (e) {}
+    throw new Error('Still on login page. Check credentials/token/cookies. Debug artifacts saved to ./debug/');
+  }
 }
 
 async function extractWrongQuestions(page) {
@@ -171,8 +268,9 @@ async function collectWrongQuestions({
   const context = await browser.newContext();
 
   if (authToken) {
+    const headerValue = /\s/.test(authToken) ? authToken : `Token ${authToken}`;
     await context.setExtraHTTPHeaders({
-      Authorization: `Token ${authToken}`
+      Authorization: headerValue
     });
   }
 
