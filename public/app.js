@@ -11,6 +11,7 @@ const devicePollBtn = document.getElementById("devicePollBtn");
 const deviceStatusEl = document.getElementById("deviceStatus");
 
 let currentDeviceCode = "";
+let autoPollTimer = null;
 
 function setDeviceStatus(message) {
   deviceStatusEl.textContent = message;
@@ -27,6 +28,105 @@ function escapeHtml(text) {
 
 function setStatus(message) {
   statusEl.textContent = message;
+}
+
+function stopAutoPoll() {
+  if (autoPollTimer) {
+    clearInterval(autoPollTimer);
+    autoPollTimer = null;
+  }
+}
+
+function canAutoStartDeviceLogin() {
+  return aiProviderEl.value === "github-copilot" && !githubTokenEl.value.trim() && !currentDeviceCode;
+}
+
+async function pollDeviceApproval() {
+  if (!currentDeviceCode) {
+    throw new Error("Device login not started.");
+  }
+
+  const response = await fetch("/api/github/device/poll", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ deviceCode: currentDeviceCode })
+  });
+
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error || "Device poll failed");
+  }
+
+  if (data.status === "pending" || data.status === "slow_down") {
+    setDeviceStatus("Waiting for approval. Please complete authorization in browser...");
+    return;
+  }
+
+  if (data.status === "approved" && data.accessToken) {
+    githubTokenEl.value = data.accessToken;
+    aiProviderEl.value = "github-copilot";
+    currentDeviceCode = "";
+    stopAutoPoll();
+    setDeviceStatus("Approved. GitHub token has been filled into the form.");
+    devicePollBtn.disabled = true;
+    return;
+  }
+
+  setDeviceStatus("Unexpected response from server.");
+}
+
+async function startDeviceLogin({ autoPoll = true } = {}) {
+  deviceStartBtn.disabled = true;
+  setDeviceStatus("Starting GitHub device login...");
+
+  try {
+    const response = await fetch("/api/github/device/start", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: githubClientIdEl.value.trim() || undefined
+      })
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.error || "Failed to start device login");
+    }
+
+    currentDeviceCode = data.deviceCode;
+    devicePollBtn.disabled = false;
+
+    const verifyLink = data.verificationUriComplete || data.verificationUri;
+    setDeviceStatus(
+      [
+        "Open this URL and approve:",
+        verifyLink,
+        "",
+        `User code: ${data.userCode}`,
+        "",
+        autoPoll ? "Auto-checking approval every 5s..." : "Then click 'Check Approval'."
+      ].join("\n")
+    );
+
+    stopAutoPoll();
+    if (autoPoll) {
+      autoPollTimer = setInterval(async () => {
+        if (!currentDeviceCode) {
+          stopAutoPoll();
+          return;
+        }
+
+        try {
+          await pollDeviceApproval();
+        } catch (error) {
+          setDeviceStatus(`Error: ${error.message}`);
+          stopAutoPoll();
+        }
+      }, 5000);
+    }
+  } finally {
+    deviceStartBtn.disabled = false;
+  }
 }
 
 function renderSummary(data) {
@@ -110,80 +210,40 @@ form.addEventListener("submit", async (event) => {
 
 deviceStartBtn.addEventListener("click", async () => {
   try {
-    deviceStartBtn.disabled = true;
-    setDeviceStatus("Starting GitHub device login...");
-
-    const response = await fetch("/api/github/device/start", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clientId: githubClientIdEl.value.trim() || undefined
-      })
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Failed to start device login");
-    }
-
-    currentDeviceCode = data.deviceCode;
-    devicePollBtn.disabled = false;
-
-    const verifyLink = data.verificationUriComplete || data.verificationUri;
-    setDeviceStatus(
-      [
-        "Open this URL and approve:",
-        verifyLink,
-        "",
-        `User code: ${data.userCode}`,
-        "",
-        "Then click 'Check Approval'."
-      ].join("\n")
-    );
+    await startDeviceLogin({ autoPoll: true });
   } catch (error) {
     setDeviceStatus(`Error: ${error.message}`);
-  } finally {
-    deviceStartBtn.disabled = false;
   }
 });
 
 devicePollBtn.addEventListener("click", async () => {
   try {
-    if (!currentDeviceCode) {
-      throw new Error("Device login not started.");
-    }
-
     devicePollBtn.disabled = true;
     setDeviceStatus("Checking approval status...");
-
-    const response = await fetch("/api/github/device/poll", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ deviceCode: currentDeviceCode })
-    });
-
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(data.error || "Device poll failed");
-    }
-
-    if (data.status === "pending" || data.status === "slow_down") {
-      setDeviceStatus("Waiting for approval. Please complete authorization in browser, then check again.");
-      return;
-    }
-
-    if (data.status === "approved" && data.accessToken) {
-      githubTokenEl.value = data.accessToken;
-      aiProviderEl.value = "github-copilot";
-      setDeviceStatus("Approved. GitHub token has been filled into the form.");
-      currentDeviceCode = "";
-      return;
-    }
-
-    setDeviceStatus("Unexpected response from server.");
+    await pollDeviceApproval();
   } catch (error) {
     setDeviceStatus(`Error: ${error.message}`);
   } finally {
     devicePollBtn.disabled = !currentDeviceCode;
+  }
+});
+
+aiProviderEl.addEventListener("change", async () => {
+  if (!canAutoStartDeviceLogin()) {
+    return;
+  }
+
+  try {
+    await startDeviceLogin({ autoPoll: true });
+  } catch (error) {
+    setDeviceStatus(`Error: ${error.message}`);
+  }
+});
+
+githubTokenEl.addEventListener("input", () => {
+  if (githubTokenEl.value.trim()) {
+    currentDeviceCode = "";
+    stopAutoPoll();
+    devicePollBtn.disabled = true;
   }
 });
