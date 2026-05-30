@@ -239,16 +239,21 @@ form.addEventListener("submit", async (event) => {
   summaryEl.innerHTML = "";
   analysisEl.innerHTML = "";
 
+  function safeVal(id) {
+    const el = document.getElementById(id);
+    return el ? el.value.trim() : "";
+  }
+
   const payload = {
-    attemptUrl: document.getElementById("attemptUrl").value.trim(),
-    email: document.getElementById("email").value.trim(),
-    password: document.getElementById("password").value,
-    authToken: document.getElementById("authToken").value.trim(),
-    cookies: document.getElementById("cookies").value.trim(),
-    apiKey: document.getElementById("apiKey").value.trim(),
-    model: document.getElementById("model").value.trim(),
-    aiProvider: aiProviderEl.value,
-    githubToken: githubTokenEl.value.trim()
+    attemptUrl: safeVal("attemptUrl"),
+    email: safeVal("email"),
+    password: (document.getElementById("password") || {}).value || "",
+    authToken: safeVal("authToken"),
+    cookies: safeVal("cookies"),
+    apiKey: safeVal("apiKey"),
+    model: safeVal("model"),
+    aiProvider: aiProviderEl ? aiProviderEl.value : "openai",
+    githubToken: githubTokenEl ? githubTokenEl.value.trim() : ""
   };
 
   submitBtn.disabled = true;
