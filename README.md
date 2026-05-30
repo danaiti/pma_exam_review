@@ -20,6 +20,31 @@
 6. Open:
    - `http://localhost:3000`
 
+## Deploy on Render (single website for FE + BE)
+This project already uses one Express server to serve both frontend (`public/`) and backend APIs (`/api/*`), so deploy as a single Render Web Service.
+
+### Option A: Blueprint (recommended)
+1. Push code to GitHub.
+2. In Render, choose `New +` -> `Blueprint`.
+3. Select this repository (Render will read `render.yaml`).
+4. Set secret env vars in Render dashboard:
+   - `OPENAI_API_KEY` (if using OpenAI provider)
+   - `GITHUB_CLIENT_ID` (for Device Login)
+   - Optional: `GITHUB_COPILOT_CHAT_URL`, `GITHUB_COPILOT_MODEL`
+5. Deploy.
+
+### Option B: Manual Web Service
+1. In Render, choose `New +` -> `Web Service`.
+2. Connect repository.
+3. Choose `Environment: Docker`.
+4. Render will use `Dockerfile` and expose one public URL.
+5. Add the same environment variables above.
+
+### How FE + BE are served together
+- Frontend: `GET /` -> static files from `public/`
+- Backend API: `POST /api/collect`, `POST /api/analyze`, `POST /api/collect-analyze`
+- Health check: `GET /health`
+
 ## Device Login flow (GitHub)
 1. In the UI, open `GitHub Device Login` section.
 2. Enter OAuth App `Client ID` (or use `GITHUB_CLIENT_ID` in env).

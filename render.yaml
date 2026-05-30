@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: pma-exam-review
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    autoDeploy: true
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: OPENAI_MODEL
+        value: gpt-4.1-mini
+      - key: GITHUB_DEVICE_SCOPE
+        value: read:user user:email
