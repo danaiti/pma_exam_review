@@ -12,6 +12,7 @@ const deviceStatusEl = document.getElementById("deviceStatus");
 
 let currentDeviceCode = "";
 let autoPollTimer = null;
+const DEVICE_WAIT_TIMEOUT_MS = 3 * 60 * 1000;
 
 function setDeviceStatus(message) {
   deviceStatusEl.textContent = message;
@@ -97,6 +98,9 @@ async function startDeviceLogin({ autoPoll = true } = {}) {
     devicePollBtn.disabled = false;
 
     const verifyLink = data.verificationUriComplete || data.verificationUri;
+    if (verifyLink) {
+      window.open(verifyLink, "_blank", "noopener,noreferrer");
+    }
     setDeviceStatus(
       [
         "Open this URL and approve:",
@@ -126,6 +130,31 @@ async function startDeviceLogin({ autoPoll = true } = {}) {
     }
   } finally {
     deviceStartBtn.disabled = false;
+  }
+}
+
+async function ensureGitHubTokenReady() {
+  if (aiProviderEl.value !== "github-copilot") {
+    return;
+  }
+
+  if (githubTokenEl.value.trim()) {
+    return;
+  }
+
+  if (!currentDeviceCode) {
+    await startDeviceLogin({ autoPoll: true });
+  }
+
+  const startedAt = Date.now();
+  setStatus("Waiting for GitHub approval...");
+
+  while (!githubTokenEl.value.trim()) {
+    if (Date.now() - startedAt > DEVICE_WAIT_TIMEOUT_MS) {
+      throw new Error("GitHub authorization timed out. Approve in browser, then try again.");
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1200));
   }
 }
 
@@ -183,9 +212,13 @@ form.addEventListener("submit", async (event) => {
   };
 
   submitBtn.disabled = true;
-  setStatus("Collecting wrong answers from LMS...");
+  setStatus("Preparing authentication...");
 
   try {
+    await ensureGitHubTokenReady();
+    payload.githubToken = githubTokenEl.value.trim();
+    setStatus("Collecting wrong answers from LMS...");
+
     const response = await fetch("/api/collect-analyze", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
