@@ -22,11 +22,11 @@ app.get("/health", (_req, res) => {
 app.post("/api/github/device/start", async (req, res) => {
   try {
     const { clientId, scope } = req.body || {};
-    const resolvedClientId = clientId || process.env.GITHUB_CLIENT_ID;
+    const resolvedClientId = clientId || process.env.GITHUB_CLIENT_ID || process.env._COPILOT_CLIENT_ID;
     const resolvedScope = scope || process.env.GITHUB_DEVICE_SCOPE || "read:user user:email";
 
     if (!resolvedClientId) {
-      return res.status(400).json({ error: "Missing GitHub OAuth App clientId (set GITHUB_CLIENT_ID or provide clientId)." });
+      return res.status(400).json({ error: "Missing GitHub OAuth App clientId (set GITHUB_CLIENT_ID/_COPILOT_CLIENT_ID or provide clientId)." });
     }
 
     const payload = new URLSearchParams();
