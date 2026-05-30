@@ -142,19 +142,59 @@ async function ensureGitHubTokenReady() {
     return;
   }
 
+  // Start device login (background interval still runs for the sidebar, but we
+  // poll directly here so approval is detected as soon as it happens).
   if (!currentDeviceCode) {
     await startDeviceLogin({ autoPoll: true });
   }
 
   const startedAt = Date.now();
-  setStatus("Waiting for GitHub approval...");
 
-  while (!githubTokenEl.value.trim()) {
+  while (true) {
     if (Date.now() - startedAt > DEVICE_WAIT_TIMEOUT_MS) {
       throw new Error("GitHub authorization timed out. Approve in browser, then try again.");
     }
 
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // If background interval already filled the token, we're done.
+    if (githubTokenEl.value.trim()) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+    setStatus(`Waiting for GitHub approval (${elapsed}s)... Approve in the browser tab.`);
+
+    // Poll directly — don't rely on the background interval timing.
+    try {
+      const res = await fetch("/api/github/device/poll", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceCode: currentDeviceCode })
+      });
+
+      const data = await res.json();
+
+      if (data.status === "approved" && data.accessToken) {
+        githubTokenEl.value = data.accessToken;
+        currentDeviceCode = "";
+        stopAutoPoll();
+        setDeviceStatus("Approved. GitHub token has been filled into the form.");
+        devicePollBtn.disabled = true;
+        return;
+      }
+
+      if (data.error && data.error !== "authorization_pending") {
+        throw new Error(data.error);
+      }
+
+      setDeviceStatus(`Waiting for approval (${elapsed}s)... Please complete authorization in browser.`);
+    } catch (err) {
+      // Surface non-pending errors; swallow network blips.
+      if (err.message && !err.message.toLowerCase().includes("pending")) {
+        throw err;
+      }
+    }
   }
 }
 
