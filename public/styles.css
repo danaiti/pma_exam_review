@@ -1,0 +1,112 @@
+:root {
+  --bg: #f3f7fb;
+  --panel: #ffffff;
+  --text: #182230;
+  --muted: #617085;
+  --accent: #0b6bcb;
+  --border: #d8e3ee;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  color: var(--text);
+  background: radial-gradient(circle at top right, #dceaf9, var(--bg) 40%);
+}
+
+.app-shell {
+  width: min(1100px, 92vw);
+  margin: 24px auto;
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(10, 40, 80, 0.08);
+}
+
+h1, h2, h3 {
+  margin: 0 0 10px;
+}
+
+.subtitle {
+  color: var(--muted);
+  margin: 0 0 16px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+  font-weight: 600;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  padding: 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+textarea {
+  resize: vertical;
+}
+
+button {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.status {
+  background: #0d1b2a;
+  color: #d2e7ff;
+  border-radius: 10px;
+  padding: 12px;
+  overflow-x: auto;
+}
+
+.card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  margin-top: 10px;
+  background: #fbfdff;
+}
+
+.actions-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.device-login .status {
+  margin-top: 10px;
+}
+
+.muted {
+  color: var(--muted);
+}

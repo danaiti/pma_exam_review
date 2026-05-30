@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LMS Wrong Answer Analyzer</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="panel">
+        <h1>LMS Wrong Answer Analyzer</h1>
+        <p class="subtitle">Input your attempt URL and account data to collect wrong answers, then analyze learning gaps with AI.</p>
+
+        <form id="analyzerForm" class="form-grid">
+          <label>
+            Attempt URL
+            <input id="attemptUrl" type="url" placeholder="https://www.lms.pma.edu.vn/#/.../attempts/..." required />
+          </label>
+
+          <label>
+            Email
+            <input id="email" type="email" placeholder="you@example.com" />
+          </label>
+
+          <label>
+            Password
+            <input id="password" type="password" placeholder="Your LMS password" />
+          </label>
+
+          <label>
+            Authorization Token (without Token prefix)
+            <input id="authToken" type="text" placeholder="abc123..." />
+          </label>
+
+          <label>
+            Cookies String
+            <textarea id="cookies" rows="3" placeholder="_ga=...; _gcl_au=...;"></textarea>
+          </label>
+
+          <label>
+            AI Provider
+            <select id="aiProvider">
+              <option value="openai" selected>OpenAI</option>
+              <option value="github-copilot">GitHub Copilot</option>
+            </select>
+          </label>
+
+          <label>
+            OpenAI API Key (optional if set in .env or when provider is OpenAI)
+            <input id="apiKey" type="password" placeholder="sk-..." />
+          </label>
+
+          <label>
+            GitHub Token (auto-filled by Device Login)
+            <input id="githubToken" type="password" placeholder="gho_..." />
+          </label>
+
+          <label>
+            Model
+            <input id="model" type="text" value="gpt-4.1-mini" />
+          </label>
+
+          <button id="submitBtn" type="submit">Collect + Analyze</button>
+        </form>
+
+        <div class="device-login card">
+          <h3>GitHub Device Login</h3>
+          <p class="muted">Use this flow to sign in and get token for GitHub Copilot analysis.</p>
+          <label>
+            GitHub OAuth App Client ID
+            <input id="githubClientId" type="text" placeholder="Iv1.xxxxx" />
+          </label>
+          <div class="actions-row">
+            <button id="deviceStartBtn" type="button">Start Device Login</button>
+            <button id="devicePollBtn" type="button" disabled>Check Approval</button>
+          </div>
+          <pre id="deviceStatus" class="status">Not started</pre>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Result</h2>
+        <pre id="status" class="status">Idle</pre>
+        <div id="summary"></div>
+        <div id="analysis"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
