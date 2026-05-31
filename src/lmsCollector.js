@@ -392,6 +392,11 @@ async function collectWrongQuestions({
     await page.goto(attemptUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
     console.log("[Collector] Page loaded, URL:", page.url());
     
+    // Wait a bit for any redirects to happen
+    console.log("[Collector] Waiting for any redirects...");
+    await page.waitForTimeout(2000);
+    console.log("[Collector] URL after redirect wait:", page.url());
+    
     await loginIfNeeded(page, email, password);
 
     if (page.url() !== attemptUrl) {
