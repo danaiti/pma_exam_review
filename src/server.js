@@ -62,6 +62,7 @@ app.post("/api/github/device/start", async (req, res) => {
     });
   } catch (error) {
     const message = error && error.message ? error.message : "Unknown error";
+    console.error("[/api/github/device/start] Error:", message, error);
     return res.status(500).json({ error: message });
   }
 });
@@ -116,6 +117,7 @@ app.post("/api/github/device/poll", async (req, res) => {
     });
   } catch (error) {
     const message = error && error.message ? error.message : "Unknown error";
+    console.error("[/api/github/device/poll] Error:", message, error);
     return res.status(500).json({ error: message });
   }
 });
@@ -128,6 +130,7 @@ app.post("/api/collect", async (req, res) => {
       return res.status(400).json({ error: "attemptUrl is required" });
     }
 
+    console.log("[/api/collect] Starting collection");
     const result = await collectWrongQuestions({
       attemptUrl,
       email,
@@ -136,9 +139,12 @@ app.post("/api/collect", async (req, res) => {
       cookies
     });
 
+    console.log("[/api/collect] Collection completed successfully");
     return res.json(result);
   } catch (error) {
     const message = error && error.message ? error.message : "Unknown error";
+    console.error("[/api/collect] Error:", message);
+    console.error("[/api/collect] Full error:", error);
     return res.status(500).json({ error: message });
   }
 });
@@ -162,6 +168,7 @@ app.post("/api/analyze", async (req, res) => {
     return res.json({ analysis });
   } catch (error) {
     const message = error && error.message ? error.message : "Unknown error";
+    console.error("[/api/analyze] Error:", message, error);
     return res.status(500).json({ error: message });
   }
 });
@@ -184,6 +191,7 @@ app.post("/api/collect-analyze", async (req, res) => {
       return res.status(400).json({ error: "attemptUrl is required" });
     }
 
+    console.log("[/api/collect-analyze] Starting collection and analysis");
     const collected = await collectWrongQuestions({
       attemptUrl,
       email,
@@ -192,13 +200,17 @@ app.post("/api/collect-analyze", async (req, res) => {
       cookies
     });
 
+    console.log("[/api/collect-analyze] Collection complete, total wrong:", collected.totalWrong);
+
     if (!Array.isArray(collected.wrongQuestions) || collected.wrongQuestions.length === 0) {
+      console.log("[/api/collect-analyze] No wrong questions found, returning early");
       return res.json({
         ...collected,
         analysis: []
       });
     }
 
+    console.log("[/api/collect-analyze] Starting analysis");
     const analysis = await analyzeWrongQuestions({
       wrongQuestions: collected.wrongQuestions,
       apiKey,
@@ -207,12 +219,15 @@ app.post("/api/collect-analyze", async (req, res) => {
       githubToken
     });
 
+    console.log("[/api/collect-analyze] Analysis complete");
     return res.json({
       ...collected,
       analysis
     });
   } catch (error) {
     const message = error && error.message ? error.message : "Unknown error";
+    console.error("[/api/collect-analyze] Error:", message);
+    console.error("[/api/collect-analyze] Full error:", error);
     return res.status(500).json({ error: message });
   }
 });
