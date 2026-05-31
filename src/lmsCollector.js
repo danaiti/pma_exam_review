@@ -289,15 +289,23 @@ async function extractWrongQuestions(page) {
 
     function optionRows(card) {
       const rows = [];
-      const candidates = card.querySelectorAll("div");
+      // Find all checkboxes inside this card and resolve their full option row
+      const checkboxes = card.querySelectorAll('input[type="checkbox"]');
 
-      for (const node of candidates) {
-        const checkbox = node.querySelector('input[type="checkbox"]');
-        if (!checkbox) {
-          continue;
+      for (const checkbox of checkboxes) {
+        // Climb up from the checkbox to find the nearest container that represents
+        // the whole option row (a direct or near-direct child of the card).
+        let rowNode = checkbox.parentElement;
+        while (rowNode && rowNode !== card && rowNode.parentElement !== card) {
+          rowNode = rowNode.parentElement;
         }
 
-        const rowText = text(node);
+        // Fallback: if we didn't find a suitable row container, use the closest div
+        if (!rowNode || rowNode === card) {
+          rowNode = checkbox.closest('div') || checkbox.parentElement;
+        }
+
+        const rowText = text(rowNode);
         if (!rowText || rowText.length < 2) {
           continue;
         }
