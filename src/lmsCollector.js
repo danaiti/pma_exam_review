@@ -320,10 +320,27 @@ async function extractWrongQuestions(page) {
       return rows;
     }
 
-    const cards = Array.from(document.querySelectorAll("h3"))
+    // Find question containers. Some LMS pages render a numbered H3 like "Question 1",
+    // while others render a plain "Question:" label inside a div. Support both patterns.
+    const cardsByHeader = Array.from(document.querySelectorAll("h3"))
       .filter((h) => /Question\s+\d+/i.test(text(h)))
       .map((h) => h.closest("div"))
       .filter(Boolean);
+
+    const cardsByLabel = Array.from(document.querySelectorAll("*")).
+      filter((n) => /^Question:/i.test(text(n)))
+      .map((n) => n.closest("div"))
+      .filter(Boolean);
+
+    // Merge and deduplicate
+    const cardsSet = new Set();
+    const cards = [];
+    for (const c of [...cardsByHeader, ...cardsByLabel]) {
+      if (!cardsSet.has(c)) {
+        cardsSet.add(c);
+        cards.push(c);
+      }
+    }
 
     const wrongQuestions = [];
 
