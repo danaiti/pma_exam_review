@@ -46,17 +46,21 @@ async function loginIfNeeded(page, email, password) {
   if (!email || !password) {
     throw new Error("The page redirected to login, but email/password were not provided.");
   }
-  // Try a range of selectors to find email + password inputs and the submit control.
+
+  // Prioritize ID-based selectors for this specific LMS form
   const emailSelectors = [
+    'input#email',
+    'input[id="email"]',
     'input[type="email"]',
     'input[name*="email"]',
     'input[id*="email"]',
     'input[placeholder*="Email"]',
-    'input[placeholder*="email"]',
-    'input[type="text"]'
+    'input[placeholder*="email"]'
   ];
 
   const passwordSelectors = [
+    'input#password',
+    'input[id="password"]',
     'input[type="password"]',
     'input[name*="password"]',
     'input[id*="password"]',
@@ -64,6 +68,8 @@ async function loginIfNeeded(page, email, password) {
   ];
 
   const submitSelectors = [
+    'button#sign_in_button',
+    'button[id="sign_in_button"]',
     'button[type="submit"]',
     'button:has-text("Sign In")',
     'button:has-text("Sign in")',
@@ -87,50 +93,41 @@ async function loginIfNeeded(page, email, password) {
   }
 
   const filledEmail = await findAndFill(emailSelectors, email);
-  const filledPassword = await findAndFill(passwordSelectors, password);
-
-  // If inputs not found, try to set via JS to catch SPA forms
   if (!filledEmail) {
-    await page.evaluate((v) => {
-      const q = document.querySelector('input[name*=email], input[id*=email], input[type=email], input[type=text]');
-      if (q) q.value = v;
-    }, email);
+    throw new Error("Could not find email input field. Check form structure.");
   }
 
+  const filledPassword = await findAndFill(passwordSelectors, password);
   if (!filledPassword) {
-    await page.evaluate((v) => {
-      const q = document.querySelector('input[type=password], input[name*=password], input[id*=password]');
-      if (q) q.value = v;
-    }, password);
+    throw new Error("Could not find password input field. Check form structure.");
   }
 
-  // Try to submit the form and wait for navigation or route change.
+  // Find and click the submit button
   let submitClicked = false;
   for (const sel of submitSelectors) {
     try {
       const btn = await page.$(sel);
       if (btn) {
+        // Wait for navigation/route change and button click in parallel
         await Promise.all([
           page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
+          page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}),
           btn.click()
         ]);
         submitClicked = true;
         break;
       }
     } catch (_e) {
-      // ignore
+      // ignore and try next selector
     }
   }
 
-  // If no submit button was clicked, try to submit via the form element.
   if (!submitClicked) {
-    await page.evaluate(() => {
-      const f = document.querySelector('form');
-      if (f) f.submit();
-    });
-    // give SPA some time to react
-    await page.waitForTimeout(1500);
+    throw new Error("Could not find or click sign-in button.");
   }
+
+  // Give the SPA more time to process the login and redirect
+  await page.waitForTimeout(3000);
 
   // Wait for successful redirect away from login or a recognizable app shell element
   try {
@@ -147,7 +144,14 @@ async function loginIfNeeded(page, email, password) {
     try { if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir); } catch(e){}
     try { await page.screenshot({ path: `${debugDir}/login-failed.png`, fullPage: true }); } catch (e) {}
     try { const html = await page.content(); fs.writeFileSync(`${debugDir}/login-failed.html`, html); } catch (e) {}
-    throw new Error('Still on login page. Check credentials/token/cookies. Debug artifacts saved to ./debug/');
+    
+    // Check current URL to provide more helpful error message
+    const currentUrl = page.url();
+    if (currentUrl.includes('/#/auth/login')) {
+      throw new Error('Login failed: Still on login page after submit. Check credentials. Debug artifacts saved to ./debug/');
+    } else {
+      throw new Error(`Login verification failed. Current URL: ${currentUrl}. Debug artifacts saved to ./debug/`);
+    }
   }
 }
 
