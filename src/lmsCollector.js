@@ -306,6 +306,7 @@ async function extractWrongQuestions(page) {
         }
 
         const rowText = text(rowNode);
+        const rowHtml = (rowNode && rowNode.outerHTML) ? rowNode.outerHTML.slice(0, 800) : null;
         if (!rowText || rowText.length < 2) {
           continue;
         }
@@ -313,7 +314,8 @@ async function extractWrongQuestions(page) {
         rows.push({
           text: rowText,
           checked: checkbox.checked,
-          isCorrect: /Correct Answer/i.test(rowText)
+          isCorrect: /Correct Answer/i.test(rowText),
+          rowHtml
         });
       }
 
@@ -343,6 +345,13 @@ async function extractWrongQuestions(page) {
     }
 
     const wrongQuestions = [];
+    const diagnostics = {
+      cardsCount: cards.length,
+      cardsByHeaderCount: cardsByHeader.length,
+      cardsByLabelCount: cardsByLabel.length,
+      totalCheckboxes: 0,
+      cards: []
+    };
 
     for (const card of cards) {
       const options = optionRows(card);
@@ -350,9 +359,25 @@ async function extractWrongQuestions(page) {
         continue;
       }
 
-      const selected = options.find((o) => o.checked);
-      const correct = options.find((o) => o.isCorrect);
+      const selectedIndex = options.findIndex((o) => o.checked);
+      const correctIndex = options.findIndex((o) => o.isCorrect);
 
+      diagnostics.totalCheckboxes += options.length;
+
+      diagnostics.cards.push({
+        questionNumber: getQuestionNumber(card),
+        questionText: getQuestionText(card),
+        optionCount: options.length,
+        selectedIndex,
+        correctIndex,
+        cardHtml: (card && card.outerHTML) ? card.outerHTML.slice(0, 1500) : null,
+        options: options.map((o) => ({ text: o.text, checked: !!o.checked, isCorrect: !!o.isCorrect, rowHtml: o.rowHtml }))
+      });
+
+      const selected = selectedIndex !== -1 ? options[selectedIndex] : null;
+      const correct = correctIndex !== -1 ? options[correctIndex] : null;
+
+      // If either selected or correct is missing, continue but diagnostics will show why
       if (!selected || !correct) {
         continue;
       }
@@ -375,7 +400,8 @@ async function extractWrongQuestions(page) {
     return {
       scoreText,
       wrongQuestions,
-      totalWrong: wrongQuestions.length
+      totalWrong: wrongQuestions.length,
+      diagnostics
     };
   });
 }
@@ -446,6 +472,70 @@ async function collectWrongQuestions({
     console.log("[Collector] Extracting wrong questions...");
     const extracted = await extractWrongQuestions(page);
     console.log("[Collector] Extracted:", extracted.totalWrong, "wrong questions");
+    // Verbose diagnostics to help debug parsing issues
+    try {
+      console.log("[Collector][DEBUG] scoreText:", extracted.scoreText);
+      console.log("[Collector][DEBUG] cards found:", extracted.diagnostics?.cardsCount ?? 0);
+      console.log("[Collector][DEBUG] diagnostics summary:", JSON.stringify(extracted.diagnostics, null, 2));
+
+      // Also print a human-readable per-card summary showing Question / Selected / Correct
+      if (extracted.diagnostics && Array.isArray(extracted.diagnostics.cards)) {
+        for (const c of extracted.diagnostics.cards) {
+          const qnum = c.questionNumber || '(no number)';
+          const qtext = c.questionText || '(no question text)';
+          let selected = '(none)';
+          let correct = '(none)';
+
+          if (typeof c.selectedIndex === 'number' && c.selectedIndex >= 0 && c.options && c.options[c.selectedIndex]) {
+            selected = c.options[c.selectedIndex].text || '(empty)';
+          } else {
+            // Try to find any option with checked true
+            const sel = (c.options || []).find((o) => o.checked);
+            if (sel) selected = sel.text || '(empty)';
+          }
+
+          if (typeof c.correctIndex === 'number' && c.correctIndex >= 0 && c.options && c.options[c.correctIndex]) {
+            correct = c.options[c.correctIndex].text || '(empty)';
+          } else {
+            const corr = (c.options || []).find((o) => o.isCorrect);
+            if (corr) correct = corr.text || '(empty)';
+          }
+
+          console.log('[Collector][CARD] Question', qnum + ':', qtext);
+          console.log('[Collector][CARD]   Selected ->', selected);
+          console.log('[Collector][CARD]   Correct  ->', correct);
+        }
+      }
+    } catch (e) {
+      console.log("[Collector][DEBUG] Failed to print diagnostics:", e && e.message);
+    }
+
+    // If nothing was found, save a debug snapshot (HTML + screenshot) to help
+    // diagnose parsing mismatches on real LMS pages.
+    try {
+      if (extracted.totalWrong === 0) {
+        const fs = require('fs');
+        const debugDir = './debug';
+        if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
+        const ts = Date.now();
+        try {
+          const html = await page.content();
+          fs.writeFileSync(`${debugDir}/no-wrong-${ts}.html`, html);
+        } catch (e) {
+          console.log('[Collector] Failed to save debug HTML:', e && e.message);
+        }
+
+        try {
+          await page.screenshot({ path: `${debugDir}/no-wrong-${ts}.png`, fullPage: true });
+        } catch (e) {
+          console.log('[Collector] Failed to save debug screenshot:', e && e.message);
+        }
+
+        console.log('[Collector] Debug snapshot saved for empty extraction:', `${debugDir}/no-wrong-${ts}.*`);
+      }
+    } catch (e) {
+      console.log('[Collector] Debug snapshot error:', e && e.message);
+    }
 
     return {
       finalUrl: page.url(),
