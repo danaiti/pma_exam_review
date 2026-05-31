@@ -415,11 +415,34 @@ async function extractWrongQuestions(page) {
 
     const scoreText = text(document.body).match(/Result:\s*\d+%\s*\(\d+\/\d+\)/i)?.[0] || null;
 
+    // Additionally, collect any numbered grid items marked with bg-red-200
+    const gridWrongs = Array.from(document.querySelectorAll('.grid.grid-cols-5 .bg-red-200, .grid.grid-cols-5 .!bg-red-200'))
+      .map((el) => text(el))
+      .map((t) => {
+        const m = (t || "").match(/(\d+)/);
+        return m ? Number(m[1]) : null;
+      })
+      .filter((n) => typeof n === 'number');
+
+    // Also include any bg-red-200 elements anywhere as a fallback (de-duplicated)
+    const anyBg = Array.from(document.querySelectorAll('.bg-red-200, .!bg-red-200'))
+      .map((el) => text(el))
+      .map((t) => {
+        const m = (t || "").match(/(\d+)/);
+        return m ? Number(m[1]) : null;
+      })
+      .filter((n) => typeof n === 'number');
+
+    const gridWrongNumbers = Array.from(new Set([...gridWrongs, ...anyBg]));
+
+    diagnostics.gridWrongNumbers = gridWrongNumbers;
+
     return {
       scoreText,
       wrongQuestions,
       totalWrong: wrongQuestions.length,
-      diagnostics
+      diagnostics,
+      gridWrongNumbers
     };
   });
 }
@@ -495,6 +518,7 @@ async function collectWrongQuestions({
       console.log("[Collector][DEBUG] scoreText:", extracted.scoreText);
       console.log("[Collector][DEBUG] cards found:", extracted.diagnostics?.cardsCount ?? 0);
       console.log("[Collector][DEBUG] diagnostics summary:", JSON.stringify(extracted.diagnostics, null, 2));
+      console.log("[Collector][DEBUG] gridWrongNumbers:", extracted.gridWrongNumbers || []);
 
       // Also print a human-readable per-card summary showing Question / Selected / Correct
       if (extracted.diagnostics && Array.isArray(extracted.diagnostics.cards)) {
@@ -560,11 +584,88 @@ async function collectWrongQuestions({
       console.log('[Collector] Debug snapshot error:', e && e.message);
     }
 
+    // If the page contains a numbered grid of questions and we detected red items,
+    // click each red grid cell to navigate to that question and collect its details.
+    const collectedGridQuestions = [];
+    try {
+      const gridNums = extracted.gridWrongNumbers || [];
+      console.log('[Collector] gridWrongNumbers to click:', gridNums);
+
+      for (const num of gridNums) {
+        try {
+          console.log('[Collector] Attempting to click grid item for question', num);
+          const clicked = await page.evaluate((n) => {
+            function text(el){ return (el && el.innerText||'').trim(); }
+            // Try grid-specific cells first
+            const gridCells = Array.from(document.querySelectorAll('.grid.grid-cols-5 > div, .grid.grid-cols-5 div'));
+            for (const cell of gridCells) {
+              if (text(cell) === String(n) && (cell.className||'').includes('bg-red-200') || (cell.className||'').includes('!bg-red-200')) {
+                cell.click();
+                return true;
+              }
+            }
+
+            // Fallback: any element with matching text and bg-red-200
+            const anyEls = Array.from(document.querySelectorAll('[class*="bg-red-200"], [class*="!bg-red-200"]'));
+            for (const el of anyEls) {
+              if (text(el) === String(n)) { el.click(); return true; }
+            }
+
+            // Last resort: find by exact text anywhere and click
+            const byText = Array.from(document.querySelectorAll('*')).find(e => text(e) === String(n));
+            if (byText) { byText.click(); return true; }
+
+            return false;
+          }, num);
+
+          if (!clicked) {
+            console.log('[Collector] Could not find clickable grid cell for', num);
+            continue;
+          }
+
+          // Wait briefly for UI to update after click
+          await page.waitForTimeout(600);
+
+          const extractedAfterClick = await extractWrongQuestions(page);
+
+          // Try to locate the card for this question number
+          const match = (extractedAfterClick.diagnostics?.cards || []).find(c => c.questionNumber === num || (c.questionText && c.questionText.includes(String(num))));
+          if (match) {
+            // Determine selected and correct text
+            let selText = '(none)';
+            let corrText = null;
+            if (typeof match.selectedIndex === 'number' && match.selectedIndex >= 0 && match.options && match.options[match.selectedIndex]) {
+              selText = match.options[match.selectedIndex].text;
+            } else {
+              const sel = (match.options||[]).find(o=>o.checked);
+              if (sel) selText = sel.text;
+            }
+            if (typeof match.correctIndex === 'number' && match.correctIndex >= 0 && match.options && match.options[match.correctIndex]) {
+              corrText = match.options[match.correctIndex].text;
+            } else {
+              const corr = (match.options||[]).find(o=>o.isCorrect);
+              if (corr) corrText = corr.text;
+            }
+
+            collectedGridQuestions.push({ questionNumber: match.questionNumber, questionText: match.questionText, selectedAnswer: selText, correctAnswer: corrText });
+            console.log('[Collector] Collected from grid click:', match.questionNumber, selText, '->', corrText);
+          } else {
+            console.log('[Collector] No matching card found after clicking', num);
+          }
+        } catch (e) {
+          console.log('[Collector] Error clicking/collecting for', num, e && e.message);
+        }
+      }
+    } catch (e) {
+      console.log('[Collector] Grid-click collection error:', e && e.message);
+    }
+
     return {
       finalUrl: page.url(),
       scoreText: extracted.scoreText,
       totalWrong: extracted.totalWrong,
       wrongQuestions: extracted.wrongQuestions
+      , collectedGridQuestions: collectedGridQuestions
     };
   } finally {
     await context.close();
