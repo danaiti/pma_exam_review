@@ -307,6 +307,22 @@ async function extractWrongQuestions(page) {
 
         const rowText = text(rowNode);
         const rowHtml = (rowNode && rowNode.outerHTML) ? rowNode.outerHTML.slice(0, 800) : null;
+        // Detect explicit "wrong" styling class (e.g., Tailwind's bg-red-200)
+        function nodeHasClass(n, cls) {
+          if (!n) return false;
+          try {
+            const cn = n.className || '';
+            if (typeof cn === 'string' && cn.split(/\s+/).includes(cls)) return true;
+          } catch (e) {}
+          for (const child of Array.from(n.querySelectorAll('*'))) {
+            try {
+              const ccn = child.className || '';
+              if (typeof ccn === 'string' && ccn.split(/\s+/).includes(cls)) return true;
+            } catch (e) {}
+          }
+          return false;
+        }
+        const isWrong = nodeHasClass(rowNode, 'bg-red-200') || nodeHasClass(rowNode, '!bg-red-200');
         if (!rowText || rowText.length < 2) {
           continue;
         }
@@ -315,6 +331,7 @@ async function extractWrongQuestions(page) {
           text: rowText,
           checked: checkbox.checked,
           isCorrect: /Correct Answer/i.test(rowText),
+          isWrong,
           rowHtml
         });
       }
@@ -371,28 +388,29 @@ async function extractWrongQuestions(page) {
         selectedIndex,
         correctIndex,
         cardHtml: (card && card.outerHTML) ? card.outerHTML.slice(0, 1500) : null,
-        options: options.map((o) => ({ text: o.text, checked: !!o.checked, isCorrect: !!o.isCorrect, rowHtml: o.rowHtml }))
+        options: options.map((o) => ({ text: o.text, checked: !!o.checked, isCorrect: !!o.isCorrect, isWrong: !!o.isWrong, rowHtml: o.rowHtml }))
       });
 
       const selected = selectedIndex !== -1 ? options[selectedIndex] : null;
       const correct = correctIndex !== -1 ? options[correctIndex] : null;
 
-      // If either selected or correct is missing, continue but diagnostics will show why
-      if (!selected || !correct) {
+      // Consider it wrong if the selected option is marked with the "wrong" class
+      // (bg-red-200) or if we can identify a different correct option and the texts differ.
+      const selectedIsWrong = selected ? !!selected.isWrong : false;
+      if (!selected) {
+        // nothing selected, skip
         continue;
       }
 
-      if (selected.text === correct.text) {
-        continue;
+      if (selectedIsWrong || (correct && selected.text !== correct.text)) {
+        wrongQuestions.push({
+          questionNumber: getQuestionNumber(card),
+          questionText: getQuestionText(card),
+          selectedAnswer: selected.text,
+          correctAnswer: correct ? correct.text : null,
+          tags: getTags(card)
+        });
       }
-
-      wrongQuestions.push({
-        questionNumber: getQuestionNumber(card),
-        questionText: getQuestionText(card),
-        selectedAnswer: selected.text,
-        correctAnswer: correct.text,
-        tags: getTags(card)
-      });
     }
 
     const scoreText = text(document.body).match(/Result:\s*\d+%\s*\(\d+\/\d+\)/i)?.[0] || null;
@@ -501,8 +519,13 @@ async function collectWrongQuestions({
             if (corr) correct = corr.text || '(empty)';
           }
 
+          // Detect if the selected option was marked wrong via styling
+          let selectedIsWrong = false;
+          const selObj = (c.options || []).find((o) => o.text === selected);
+          if (selObj && selObj.isWrong) selectedIsWrong = true;
+
           console.log('[Collector][CARD] Question', qnum + ':', qtext);
-          console.log('[Collector][CARD]   Selected ->', selected);
+          console.log('[Collector][CARD]   Selected ->', selected + (selectedIsWrong ? '  <-- MARKED WRONG' : ''));
           console.log('[Collector][CARD]   Correct  ->', correct);
         }
       }
