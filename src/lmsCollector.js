@@ -50,7 +50,7 @@ async function loginIfNeeded(page, email, password) {
   
   const isOnLoginPage = possibleLoginPatterns.some(pattern => url.includes(pattern));
   
-  console.log("[Login] Is on login page:", isOnLoginPage);
+  console.log("[Login] Is on login page (URL check):", isOnLoginPage);
   console.log("[Login] URL patterns checked:", possibleLoginPatterns);
 
   if (!isOnLoginPage) {
@@ -69,6 +69,9 @@ async function loginIfNeeded(page, email, password) {
   if (!email || !password) {
     throw new Error("The page redirected to login, but email/password were not provided.");
   }
+
+  console.log("[Login] Email provided:", email ? "yes (length: " + email.length + ")" : "no");
+  console.log("[Login] Password provided:", password ? "yes (length: " + password.length + ")" : "no");
 
   // Prioritize ID-based selectors for this specific LMS form
   const emailSelectors = [
@@ -106,8 +109,15 @@ async function loginIfNeeded(page, email, password) {
         const el = await page.$(sel);
         if (el) {
           console.log(`[Login] Found ${fieldName} field with selector: ${sel}`);
+          const oldValue = await el.evaluate(el => el.value);
+          console.log(`[Login] Current value before fill: "${oldValue}"`);
+          
           await el.fill(value);
-          console.log(`[Login] Filled ${fieldName} field`);
+          
+          const newValue = await el.evaluate(el => el.value);
+          console.log(`[Login] Value after fill: "${newValue}"`);
+          console.log(`[Login] Value correctly set: ${newValue === value}`);
+          
           return true;
         }
       } catch (e) {
@@ -121,7 +131,7 @@ async function loginIfNeeded(page, email, password) {
   if (!filledEmail) {
     // Debug: Log all input fields on page
     const allInputs = await page.$$eval('input', inputs => 
-      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder }))
+      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder, value: i.value }))
     );
     console.log("[Login] Available input fields:", JSON.stringify(allInputs, null, 2));
     throw new Error("Could not find email input field. Check form structure. Available inputs logged above.");
@@ -131,7 +141,7 @@ async function loginIfNeeded(page, email, password) {
   if (!filledPassword) {
     // Debug: Log all input fields on page
     const allInputs = await page.$$eval('input', inputs => 
-      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder }))
+      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder, value: i.value }))
     );
     console.log("[Login] Available input fields:", JSON.stringify(allInputs, null, 2));
     throw new Error("Could not find password input field. Check form structure. Available inputs logged above.");
@@ -145,6 +155,14 @@ async function loginIfNeeded(page, email, password) {
       const btn = await page.$(sel);
       if (btn) {
         console.log(`[Login] Found submit button with selector: ${sel}`);
+        
+        // Check button state
+        const isEnabled = await btn.evaluate(el => !el.disabled);
+        const isVisible = await btn.evaluate(el => {
+          const style = window.getComputedStyle(el);
+          return style.display !== 'none' && style.visibility !== 'hidden';
+        });
+        console.log(`[Login] Button enabled: ${isEnabled}, visible: ${isVisible}`);
         
         // Capture page state before click
         const urlBefore = page.url();
@@ -176,7 +194,7 @@ async function loginIfNeeded(page, email, password) {
   if (!submitClicked) {
     // Debug: Log all buttons on page
     const allButtons = await page.$$eval('button', buttons => 
-      buttons.map(b => ({ id: b.id, type: b.type, text: b.textContent?.trim() }))
+      buttons.map(b => ({ id: b.id, type: b.type, text: b.textContent?.trim(), disabled: b.disabled }))
     );
     console.log("[Login] Available buttons:", JSON.stringify(allButtons, null, 2));
     throw new Error("Could not find or click sign-in button. Available buttons logged above.");
@@ -188,6 +206,15 @@ async function loginIfNeeded(page, email, password) {
   await page.waitForTimeout(3000);
   const urlAfterWait = page.url();
   console.log("[Login] URL after 3s wait:", urlAfterWait);
+
+  // Check for error messages on page
+  const errorMessages = await page.$$eval('[role="alert"], .error, .alert-error, [class*="error"]', elements => 
+    elements.map(el => el.textContent?.trim()).filter(Boolean)
+  ).catch(() => []);
+  
+  if (errorMessages.length > 0) {
+    console.log("[Login] Error messages found on page:", errorMessages);
+  }
 
   // Wait for successful redirect away from login or a recognizable app shell element
   console.log("[Login] Checking for successful login...");
@@ -218,7 +245,7 @@ async function loginIfNeeded(page, email, password) {
     console.log("[Login] Final URL after failed verification:", currentUrl);
     
     if (currentUrl.includes('/#/auth/login') || currentUrl.includes('/login')) {
-      throw new Error('Login failed: Still on login page after submit. Check credentials. Debug artifacts saved to ./debug/');
+      throw new Error('Login failed: Still on login page after submit. Check that email and password are correct. Debug artifacts saved to ./debug/');
     } else {
       throw new Error(`Login verification failed. Current URL: ${currentUrl}. Debug artifacts saved to ./debug/`);
     }
