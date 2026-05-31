@@ -40,12 +40,31 @@ async function loginIfNeeded(page, email, password) {
   const url = page.url();
   console.log("[Login] Current URL:", url);
 
-  if (!url.includes("/#/auth/login")) {
-    console.log("[Login] Not on login page, skipping authentication");
-    return;
-  }
+  // Check for multiple possible login page patterns
+  const possibleLoginPatterns = [
+    '/#/auth/login',
+    '/login',
+    'sign-in',
+    'sign_in'
+  ];
+  
+  const isOnLoginPage = possibleLoginPatterns.some(pattern => url.includes(pattern));
+  
+  console.log("[Login] Is on login page:", isOnLoginPage);
+  console.log("[Login] URL patterns checked:", possibleLoginPatterns);
 
-  console.log("[Login] On login page, attempting to authenticate...");
+  if (!isOnLoginPage) {
+    // Even if URL doesn't look like login, check if login form exists on page
+    const loginFormExists = await page.$('input#email') || await page.$('input#password');
+    console.log("[Login] Login form found on page:", !!loginFormExists);
+    
+    if (!loginFormExists) {
+      console.log("[Login] Not on login page and no login form found, skipping authentication");
+      return;
+    }
+    
+    console.log("[Login] No obvious login URL, but login form found on page - attempting login");
+  }
 
   if (!email || !password) {
     throw new Error("The page redirected to login, but email/password were not provided.");
@@ -175,7 +194,7 @@ async function loginIfNeeded(page, email, password) {
   try {
     await page.waitForFunction(() => {
       const url = window.location.href || '';
-      const isNotLoginPage = !url.includes('/#/auth/login');
+      const isNotLoginPage = !url.includes('/#/auth/login') && !url.includes('/login');
       const hasAppShell = !!document.querySelector('a[href="#/student/enrolls"], nav');
       
       console.log(`[Login] Check - URL no login: ${isNotLoginPage}, Has app shell: ${hasAppShell}, URL: ${url}`);
@@ -198,7 +217,7 @@ async function loginIfNeeded(page, email, password) {
     const currentUrl = page.url();
     console.log("[Login] Final URL after failed verification:", currentUrl);
     
-    if (currentUrl.includes('/#/auth/login')) {
+    if (currentUrl.includes('/#/auth/login') || currentUrl.includes('/login')) {
       throw new Error('Login failed: Still on login page after submit. Check credentials. Debug artifacts saved to ./debug/');
     } else {
       throw new Error(`Login verification failed. Current URL: ${currentUrl}. Debug artifacts saved to ./debug/`);
@@ -349,14 +368,22 @@ async function collectWrongQuestions({
     await loginIfNeeded(page, email, password);
 
     if (page.url() !== attemptUrl) {
-      console.log("[Collector] Navigating back to attempt URL...");
+      console.log("[Collector] Current URL does not match attempt URL, navigating back...");
+      console.log("[Collector] Current URL:", page.url());
+      console.log("[Collector] Attempt URL:", attemptUrl);
       await page.goto(attemptUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
     }
 
     await page.waitForTimeout(2500);
 
-    if (page.url().includes("/#/auth/login")) {
-      throw new Error("Still on login page. Check credentials/token/cookies.");
+    console.log("[Collector] Final URL:", page.url());
+    
+    // Check if page has login form (indicating authentication failed)
+    const hasLoginForm = await page.$('input#email') !== null;
+    console.log("[Collector] Page has login form:", hasLoginForm);
+    
+    if (hasLoginForm) {
+      throw new Error("Still on login page or page requires authentication. Check credentials/token/cookies.");
     }
 
     console.log("[Collector] Extracting wrong questions...");
