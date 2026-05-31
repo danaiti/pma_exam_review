@@ -38,10 +38,14 @@ function sanitizeText(text) {
 
 async function loginIfNeeded(page, email, password) {
   const url = page.url();
+  console.log("[Login] Current URL:", url);
 
   if (!url.includes("/#/auth/login")) {
+    console.log("[Login] Not on login page, skipping authentication");
     return;
   }
+
+  console.log("[Login] On login page, attempting to authenticate...");
 
   if (!email || !password) {
     throw new Error("The page redirected to login, but email/password were not provided.");
@@ -77,76 +81,123 @@ async function loginIfNeeded(page, email, password) {
     'input[type="submit"]'
   ];
 
-  async function findAndFill(selectors, value) {
+  async function findAndFill(selectors, value, fieldName) {
     for (const sel of selectors) {
       try {
         const el = await page.$(sel);
         if (el) {
+          console.log(`[Login] Found ${fieldName} field with selector: ${sel}`);
           await el.fill(value);
+          console.log(`[Login] Filled ${fieldName} field`);
           return true;
         }
-      } catch (_e) {
-        // ignore
+      } catch (e) {
+        console.log(`[Login] Selector "${sel}" failed: ${e.message}`);
       }
     }
     return false;
   }
 
-  const filledEmail = await findAndFill(emailSelectors, email);
+  const filledEmail = await findAndFill(emailSelectors, email, "email");
   if (!filledEmail) {
-    throw new Error("Could not find email input field. Check form structure.");
+    // Debug: Log all input fields on page
+    const allInputs = await page.$$eval('input', inputs => 
+      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder }))
+    );
+    console.log("[Login] Available input fields:", JSON.stringify(allInputs, null, 2));
+    throw new Error("Could not find email input field. Check form structure. Available inputs logged above.");
   }
 
-  const filledPassword = await findAndFill(passwordSelectors, password);
+  const filledPassword = await findAndFill(passwordSelectors, password, "password");
   if (!filledPassword) {
-    throw new Error("Could not find password input field. Check form structure.");
+    // Debug: Log all input fields on page
+    const allInputs = await page.$$eval('input', inputs => 
+      inputs.map(i => ({ id: i.id, name: i.name, type: i.type, placeholder: i.placeholder }))
+    );
+    console.log("[Login] Available input fields:", JSON.stringify(allInputs, null, 2));
+    throw new Error("Could not find password input field. Check form structure. Available inputs logged above.");
   }
 
   // Find and click the submit button
+  console.log("[Login] Looking for submit button...");
   let submitClicked = false;
   for (const sel of submitSelectors) {
     try {
       const btn = await page.$(sel);
       if (btn) {
+        console.log(`[Login] Found submit button with selector: ${sel}`);
+        
+        // Capture page state before click
+        const urlBefore = page.url();
+        console.log("[Login] URL before submit:", urlBefore);
+
         // Wait for navigation/route change and button click in parallel
-        await Promise.all([
-          page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch(() => {}),
-          page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {}),
-          btn.click()
-        ]);
+        try {
+          await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle', timeout: 15000 }).catch((e) => {
+              console.log("[Login] waitForNavigation timeout (expected for SPA):", e.message);
+            }),
+            page.waitForLoadState('networkidle', { timeout: 15000 }).catch((e) => {
+              console.log("[Login] waitForLoadState timeout (expected for SPA):", e.message);
+            }),
+            btn.click()
+          ]);
+        } catch (e) {
+          console.log("[Login] Promise.all error:", e.message);
+        }
+
         submitClicked = true;
         break;
       }
-    } catch (_e) {
-      // ignore and try next selector
+    } catch (e) {
+      console.log(`[Login] Submit selector "${sel}" error:`, e.message);
     }
   }
 
   if (!submitClicked) {
-    throw new Error("Could not find or click sign-in button.");
+    // Debug: Log all buttons on page
+    const allButtons = await page.$$eval('button', buttons => 
+      buttons.map(b => ({ id: b.id, type: b.type, text: b.textContent?.trim() }))
+    );
+    console.log("[Login] Available buttons:", JSON.stringify(allButtons, null, 2));
+    throw new Error("Could not find or click sign-in button. Available buttons logged above.");
   }
+
+  console.log("[Login] Submit button clicked, waiting for page transition...");
 
   // Give the SPA more time to process the login and redirect
   await page.waitForTimeout(3000);
+  const urlAfterWait = page.url();
+  console.log("[Login] URL after 3s wait:", urlAfterWait);
 
   // Wait for successful redirect away from login or a recognizable app shell element
+  console.log("[Login] Checking for successful login...");
   try {
     await page.waitForFunction(() => {
       const url = window.location.href || '';
-      if (!url.includes('/#/auth/login')) return true;
-      // look for an element present in app shell (e.g., 'My courses' link)
-      return !!document.querySelector('a[href="#/student/enrolls"], nav');
+      const isNotLoginPage = !url.includes('/#/auth/login');
+      const hasAppShell = !!document.querySelector('a[href="#/student/enrolls"], nav');
+      
+      console.log(`[Login] Check - URL no login: ${isNotLoginPage}, Has app shell: ${hasAppShell}, URL: ${url}`);
+      
+      return isNotLoginPage || hasAppShell;
     }, { timeout: 10000 });
+    
+    console.log("[Login] Login successful!");
   } catch (err) {
+    console.log("[Login] Login verification failed:", err.message);
+    
     // On failure, capture debug artifacts to help diagnose
     const fs = require('fs');
     const debugDir = './debug';
     try { if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir); } catch(e){}
-    try { await page.screenshot({ path: `${debugDir}/login-failed.png`, fullPage: true }); } catch (e) {}
-    try { const html = await page.content(); fs.writeFileSync(`${debugDir}/login-failed.html`, html); } catch (e) {}
+    try { await page.screenshot({ path: `${debugDir}/login-failed.png`, fullPage: true }); console.log("[Debug] Screenshot saved"); } catch (e) { console.log("[Debug] Screenshot error:", e.message); }
+    try { const html = await page.content(); fs.writeFileSync(`${debugDir}/login-failed.html`, html); console.log("[Debug] HTML saved"); } catch (e) { console.log("[Debug] HTML save error:", e.message); }
     
     // Check current URL to provide more helpful error message
     const currentUrl = page.url();
+    console.log("[Login] Final URL after failed verification:", currentUrl);
+    
     if (currentUrl.includes('/#/auth/login')) {
       throw new Error('Login failed: Still on login page after submit. Check credentials. Debug artifacts saved to ./debug/');
     } else {
@@ -268,6 +319,9 @@ async function collectWrongQuestions({
   const url = new URL(attemptUrl);
   const domain = `.${url.hostname.replace(/^www\./, "")}`;
 
+  console.log("[Collector] Starting collection with URL:", attemptUrl);
+  console.log("[Collector] Domain:", domain);
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext();
 
@@ -276,20 +330,26 @@ async function collectWrongQuestions({
     await context.setExtraHTTPHeaders({
       Authorization: headerValue
     });
+    console.log("[Collector] Auth token set");
   }
 
   const cookieList = parseCookies(cookies, domain);
   if (cookieList.length > 0) {
     await context.addCookies(cookieList);
+    console.log("[Collector] Cookies added:", cookieList.length);
   }
 
   const page = await context.newPage();
 
   try {
+    console.log("[Collector] Navigating to attempt URL...");
     await page.goto(attemptUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
+    console.log("[Collector] Page loaded, URL:", page.url());
+    
     await loginIfNeeded(page, email, password);
 
     if (page.url() !== attemptUrl) {
+      console.log("[Collector] Navigating back to attempt URL...");
       await page.goto(attemptUrl, { waitUntil: "domcontentloaded", timeout: 90000 });
     }
 
@@ -299,7 +359,9 @@ async function collectWrongQuestions({
       throw new Error("Still on login page. Check credentials/token/cookies.");
     }
 
+    console.log("[Collector] Extracting wrong questions...");
     const extracted = await extractWrongQuestions(page);
+    console.log("[Collector] Extracted:", extracted.totalWrong, "wrong questions");
 
     return {
       finalUrl: page.url(),
